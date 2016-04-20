@@ -1,0 +1,132 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'net/http'
+require 'optparse'
+
+# -----------------
+# Constants
+# -----------------
+
+MAIN_CLASS = 'eu.shiftforward.adstax.spark.SparkJobRunner'
+SPARK_EXECUTOR_URI = 'https://s3.amazonaws.com/shiftforward-public/bin/spark/spark-2.0.0-SNAPSHOT-bin-2.4.0.tgz'
+SPARK_SCALA_VERSION = '2.11' # TODO: Support other versions and use different executors
+
+# -----------------
+# CLI arguments parsing
+# -----------------
+
+$cli_args = {}
+
+ARGV << '-h' if ARGV.empty?
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{$0} <action> --adstax-host <adstax_host> [<options>]"
+  opts.separator ''
+  opts.separator 'Submit, kill, query the status, or inspect the log of a Spark job running in an AdStax cluster.'
+  opts.separator "<action> is one of 'submit', 'kill', 'status' or 'log'."
+  opts.separator "Example: #{$0} submit --adstax-host sample-adstax-instance.dev.adstax.io --jar http://s3.amazonaws.com/shiftforward-public/bin/spark/adstax-spark-examples.jar --job eu.shiftforward.adstax.TestElasticSearchJob 2"
+  opts.separator "Example: #{$0} kill driver-20160420105830-0001"
+  opts.separator ''
+  opts.separator 'Options:'
+
+  opts.on('--adstax-host STRING', 'Host suffix to the AdStax cluster services.') do |host_suffix|
+    $cli_args[:host_suffix] = host_suffix
+  end
+
+  opts.on('--jar STRING',
+          'Path to a bundled jar including your application and all dependencies.',
+          'The URL must be globally visible inside of your cluster.') do |jar|
+    $cli_args[:jar] = jar
+  end
+
+  opts.on('--job STRING',
+          'Fully qualified name of the class extending `eu.shiftforward.adstax.spark.SparkJob`.',
+          'The class will be used as the Spark job to run.') do |job|
+    $cli_args[:job] = job
+  end
+
+  opts.on('--submission-id STRING',
+          'Id of the submission (required for the kill, status and log actions)') do |submission_id|
+    $cli_args[:submission_id] = submission_id
+  end
+
+  opts.on_tail('-h', '--help', 'Show this message.') do
+    puts opts
+    exit
+  end
+end.parse!
+
+def warn_missing(name)
+  puts "Missing required argument: #{name}"
+  exit 1
+end
+
+$action = ARGV.shift || begin
+  warn_missing('action')
+end
+
+warn_missing('--adstax-host') unless $cli_args[:host_suffix]
+$cluster_dispatcher_host = "http://spark-cluster-dispatcher.#{$cli_args[:host_suffix]}:7077"
+
+# -----------------
+# Program start
+# -----------------
+
+case $action
+when 'submit'
+  warn_missing('--jar') unless $cli_args[:jar]
+  warn_missing('--job') unless $cli_args[:job]
+  uri = URI.parse($cluster_dispatcher_host)
+  http = Net::HTTP.new(uri.host, uri.port)
+  payload = {
+    'action' => 'CreateSubmissionRequest',
+    'appArgs' => ['--job', $cli_args[:job]].concat(ARGV),
+    'appResource' => $cli_args[:jar],
+    'mainClass' => MAIN_CLASS,
+    'clientSparkVersion' => '1.6.1',
+    'environmentVariables' => {
+      'SPARK_SCALA_VERSION' => SPARK_SCALA_VERSION
+    },
+    'sparkProperties' => {
+      'spark.jars' => $cli_args[:jar],
+      'spark.driver.supervise' => 'false',
+      'spark.app.name' => MAIN_CLASS,
+      'spark.es.port' => '49200',
+      'spark.es.nodes' => 'localhost',
+      'spark.submit.deployMode' => 'cluster',
+      'spark.mesos.coarse' => 'false',
+      'spark.master' => "mesos://spark-cluster-dispatcher.#{$cli_args[:host_suffix]}:7077",
+      'spark.executor.uri' => SPARK_EXECUTOR_URI
+    }
+  }.to_json
+  request = Net::HTTP::Post.new(
+    '/v1/submissions/create',
+    initheader = { 'Content-Type' => 'application/json' })
+  request.body = payload
+  response = http.request(request)
+  puts response.body
+
+when 'kill'
+  warn_missing('--submission_id') unless $cli_args[:submission_id]
+  uri = URI.parse($cluster_dispatcher_host)
+  http = Net::HTTP.new(uri.host, uri.port)
+  request = Net::HTTP::Post.new("/v1/submissions/kill/#{$cli_args[:submission_id]}")
+  response = http.request(request)
+  puts response.body
+
+when 'status'
+  warn_missing('--submission_id') unless $cli_args[:submission_id]
+  uri = URI.parse($cluster_dispatcher_host)
+  http = Net::HTTP.new(uri.host, uri.port)
+  request = Net::HTTP::Get.new("/v1/submissions/status/#{$cli_args[:submission_id]}")
+  response = http.request(request)
+  puts response.body
+
+when 'log'
+  # TODO
+
+else
+  puts "Unrecognized action: #{$action}"
+  exit 1
+end
