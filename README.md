@@ -14,7 +14,7 @@ The AdStax Spark Job Manager provides a set of utilities to submit, kill and que
 
 ## Development
 
-The `lib` folder contains all the gem code, while the `bin` contains the scripts to be made available when the gem is installed.
+The `bin` directory contains the scripts to be made available when the gem is installed.
 
 To install the gem locally without sending it to Nexus, run `rake install`.
 
