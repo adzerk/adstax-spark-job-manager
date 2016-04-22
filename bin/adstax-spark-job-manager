@@ -29,7 +29,7 @@ OptionParser.new do |opts|
   opts.separator ''
   opts.separator 'Submit, kill, query the status, or inspect the log of a Spark job running in an AdStax cluster.'
   opts.separator "<action> is one of 'submit', 'kill', 'status' or 'log'."
-  opts.separator "Example: #{$0} submit --adstax-host sample-adstax-instance.dev.adstax.io --jar http://s3.amazonaws.com/shiftforward-public/bin/spark/adstax-spark-examples.jar --job eu.shiftforward.adstax.TestElasticSearchJob 2"
+  opts.separator "Example: #{$0} submit --adstax-host sample-adstax-instance.dev.adstax.io --jar http://s3.amazonaws.com/shiftforward-public/bin/spark/adstax-spark-examples.jar --job eu.shiftforward.adstax.spark.examples.SparkPi 1000"
   opts.separator "Example: #{$0} kill driver-20160420105830-0001"
   opts.separator ''
   opts.separator 'Options:'
@@ -227,7 +227,11 @@ when 'log'
   if ($cli_args[:follow])
     download_thread = Thread.new {
       loop {
-        sleep 1
+        begin
+          sleep 1
+        rescue SignalException => e
+          exit 1
+        end
         mesos_download(slave_http, directory + '/stdout', file)
       }
     }
