@@ -1,8 +1,10 @@
 #!/usr/bin/env ruby
 
+require 'file-tail'
 require 'json'
 require 'net/http'
 require 'optparse'
+require 'tempfile'
 
 # -----------------
 # Constants
@@ -16,7 +18,9 @@ SPARK_SCALA_VERSION = '2.11' # TODO: Support other versions and use different ex
 # CLI arguments parsing
 # -----------------
 
-$cli_args = {}
+$cli_args = {
+  :follow => false
+}
 
 ARGV << '-h' if ARGV.empty?
 
@@ -47,8 +51,13 @@ OptionParser.new do |opts|
   end
 
   opts.on('--submission-id STRING',
-          'Id of the submission (required for the kill, status and log actions)') do |submission_id|
+          'Id of the submission (required for the kill, status and log actions).') do |submission_id|
     $cli_args[:submission_id] = submission_id
+  end
+
+  opts.on('--follow',
+          "Enables following the file updates in the 'log' action.") do |f|
+    $cli_args[:follow] = f
   end
 
   opts.on_tail('-h', '--help', 'Show this message.') do
@@ -60,6 +69,47 @@ end.parse!
 def warn_missing(name)
   puts "Missing required argument: #{name}"
   exit 1
+end
+
+def get_http(uri)
+  uri = URI.parse(uri)
+  Net::HTTP.new(uri.host, uri.port)
+end
+
+def get_task(state_response, task_id)
+  target_tasks = []
+  state_response['completed_frameworks'].concat(state_response['frameworks']).each do |framework|
+    framework['completed_tasks'].concat(framework['tasks']).each do |task|
+      if (task['id']== task_id)
+        target_tasks.push(task)
+      end
+    end
+  end
+  target_tasks[0]
+end
+
+def get_executor(state_response, task_id)
+  target_executors = []
+  state_response['completed_frameworks'].concat(state_response['frameworks']).each do |framework|
+    framework['completed_executors'].concat(framework['executors']).each do |executor|
+      if (executor['id'] == task_id)
+        target_executors.push(executor)
+      end
+    end
+  end
+  target_executors[0]
+end
+
+def mesos_download(http, remote_file, local_file)
+  params = { :path => remote_file }
+  encoded_params = URI.encode_www_form(params)
+  file_response = http.request(Net::HTTP::Get.new(["/files/download", encoded_params].join('?')))
+  if (!file_response.class.body_permitted?)
+    puts "Unable to fetch file from slave"
+    exit 1
+  end
+  local_file.rewind
+  local_file.write(file_response.body)
 end
 
 $action = ARGV.shift || begin
@@ -124,7 +174,77 @@ when 'status'
   puts response.body
 
 when 'log'
-  # TODO
+  warn_missing('--submission_id') unless $cli_args[:submission_id]
+  marathon_http = get_http("http://marathon.#{$cli_args[:host_suffix]}")
+  marathon_response = marathon_http.request(Net::HTTP::Get.new("/v2/info"))
+  if (!marathon_response.class.body_permitted?)
+    puts "Unable to fetch Mesos leader url from Marathon"
+    exit 1
+  end
+  res = JSON.parse(marathon_response.body)
+  mesos_http = get_http(res['marathon_config']['mesos_leader_ui_url'])
+  mesos_response = mesos_http.request(Net::HTTP::Get.new("/state.json"))
+  if (!mesos_response.class.body_permitted?)
+    puts "Unable to fetch Mesos status"
+    exit 1
+  end
+  res = JSON.parse(mesos_response.body)
+  target_task = get_task(res, $cli_args[:submission_id])
+  if (!target_task)
+    puts "Unable to find submission with id #{$cli_args[:submission_id]}"
+    exit 1
+  end
+  slaves = res['slaves']
+  slave_id = target_task['slave_id']
+  target_slaves = slaves.select do |slave|
+    slave['id'] == slave_id
+  end
+  if (target_slaves.length == 0)
+    puts "Unable to find slave with id #{slave_id}"
+    exit 1
+  end
+  if (target_slaves.length != 1)
+    puts "Multiple slaves with id #{slave_id}"
+    exit 1
+  end
+  target_slave = target_slaves[0]
+  slave_http = get_http('http://' + target_slave['hostname'] + ':5051')
+  slave_response = slave_http.request(Net::HTTP::Get.new("/state.json"))
+  if (!slave_response.class.body_permitted?)
+    puts "Unable to fetch file from slave"
+    exit 1
+  end
+  res = JSON.parse(slave_response.body)
+  target_executor = get_executor(res, $cli_args[:submission_id])
+  if (!target_executor)
+    puts "Unable to find submission with id #{$cli_args[:submission_id]}"
+    exit 1
+  end
+  directory = target_executor['directory']
+  file = Tempfile.new('spark' + $cli_args[:submission_id])
+
+  download_thread = nil
+  if ($cli_args[:follow])
+    download_thread = Thread.new {
+      loop {
+        sleep 1
+        mesos_download(slave_http, directory + '/stdout', file)
+      }
+    }
+  else
+    mesos_download(slave_http, directory + '/stdout', file)
+  end
+  if ($cli_args[:follow])
+    File.open(file.path) do |log|
+      log.extend(File::Tail)
+      log.interval = 1
+      log.backward(10)
+      log.tail { |line| puts line }
+    end
+  else
+    file.rewind
+    puts file.read
+  end
 
 else
   puts "Unrecognized action: #{$action}"
