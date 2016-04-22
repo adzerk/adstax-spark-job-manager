@@ -222,14 +222,13 @@ when 'log'
   end
   directory = target_executor['directory']
   file = Tempfile.new('spark' + $cli_args[:submission_id])
-
   download_thread = nil
   if ($cli_args[:follow])
     download_thread = Thread.new {
       loop {
         begin
           sleep 1
-        rescue SignalException => e
+        rescue Interrupt => e
           exit 1
         end
         mesos_download(slave_http, directory + '/stdout', file)
@@ -243,7 +242,11 @@ when 'log'
       log.extend(File::Tail)
       log.interval = 1
       log.backward(10)
-      log.tail { |line| puts line }
+      begin
+        log.tail { |line| puts line }
+      rescue Interrupt => e
+        exit 1
+      end
     end
   else
     file.rewind
