@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 
+require 'colorize'
 require 'file-tail'
 require 'json'
 require 'net/http'
@@ -19,7 +20,8 @@ SPARK_SCALA_VERSION = '2.11' # TODO: Support other versions and use different ex
 # -----------------
 
 $cli_args = {
-  follow: false
+  follow: false,
+  show_stderr: true
 }
 
 ARGV << '-h' if ARGV.empty?
@@ -58,6 +60,11 @@ OptionParser.new do |opts|
   opts.on('-f', '--follow',
           "Enables following the file updates in the 'log' action.") do |f|
     $cli_args[:follow] = f
+  end
+
+  opts.on('--hide-stderr',
+          "Hides stderr output in the 'log' action.") do |h|
+    $cli_args[:show_stderr] = false if h
   end
 
   opts.on_tail('-h', '--help', 'Show this message.') do
@@ -106,6 +113,21 @@ def mesos_download(http, remote_file, local_file)
   end
   local_file.rewind
   local_file.write(file_response.body)
+end
+
+def tail_file(file, output_method = Proc.new { |line| puts line })
+  Thread.new do
+    File.open(file.path) do |log|
+      log.extend(File::Tail)
+      log.interval = 1
+      log.backward(10)
+      begin
+        log.tail { |line| output_method.call(line) }
+      rescue Interrupt => e
+        exit 1
+      end
+    end
+  end
 end
 
 $action = ARGV.shift || begin
@@ -217,36 +239,40 @@ when 'log'
     exit 1
   end
   directory = target_executor['directory']
-  file = Tempfile.new('spark' + $cli_args[:submission_id])
-  download_thread = nil
+  stdout_file = Tempfile.new('spark' + $cli_args[:submission_id])
+  stderr_file = Tempfile.new('spark' + $cli_args[:submission_id])
+  threads = []
   if $cli_args[:follow]
-    download_thread = Thread.new do
+    threads.push(Thread.new do
       loop do
         begin
           sleep 1
         rescue Interrupt => e
           exit 1
         end
-        mesos_download(slave_http, directory + '/stdout', file)
+        mesos_download(slave_http, directory + '/stdout', stdout_file)
+        mesos_download(slave_http, directory + '/stderr', stderr_file)
       end
-    end
+    end)
   else
-    mesos_download(slave_http, directory + '/stdout', file)
+    mesos_download(slave_http, directory + '/stdout', stdout_file)
+    mesos_download(slave_http, directory + '/stderr', stderr_file)
   end
   if $cli_args[:follow]
-    File.open(file.path) do |log|
-      log.extend(File::Tail)
-      log.interval = 1
-      log.backward(10)
-      begin
-        log.tail { |line| puts line }
-      rescue Interrupt => e
-        exit 1
-      end
+    threads.push(tail_file(stdout_file))
+    threads.push(tail_file(stderr_file, Proc.new { |line| puts line.chomp.red })) if $cli_args[:show_stderr]
+    begin
+      threads.each { |thread| thread.join }
+    rescue Interrupt => e
+      exit 1
     end
   else
-    file.rewind
-    puts file.read
+    if $cli_args[:show_stderr]
+      stderr_file.rewind
+      puts stderr_file.read.chomp.red
+    end
+    stdout_file.rewind
+    puts stdout_file.read
   end
 
 else
