@@ -55,7 +55,7 @@ OptionParser.new do |opts|
     $cli_args[:submission_id] = submission_id
   end
 
-  opts.on('--follow',
+  opts.on('-f', '--follow',
           "Enables following the file updates in the 'log' action.") do |f|
     $cli_args[:follow] = f
   end
