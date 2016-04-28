@@ -137,20 +137,13 @@ end
 warn_missing('--adstax-host') unless $cli_args[:host_suffix]
 $cluster_dispatcher_host = "http://spark-cluster-dispatcher.#{$cli_args[:host_suffix]}:7077"
 
-# -----------------
-# Program start
-# -----------------
-
-case $action
-when 'submit'
-  warn_missing('--jar') unless $cli_args[:jar]
-  warn_missing('--job') unless $cli_args[:job]
+def submit_job(jar, job)
   uri = URI.parse($cluster_dispatcher_host)
   http = Net::HTTP.new(uri.host, uri.port)
   payload = {
     'action' => 'CreateSubmissionRequest',
-    'appArgs' => ['--job', $cli_args[:job]].concat(ARGV),
-    'appResource' => $cli_args[:jar],
+    'appArgs' => ['--job', job].concat(ARGV),
+    'appResource' => jar,
     'mainClass' => MAIN_CLASS,
     'clientSparkVersion' => '1.6.1',
     'environmentVariables' => {
@@ -172,27 +165,52 @@ when 'submit'
     '/v1/submissions/create',
     initheader = { 'Content-Type' => 'application/json' })
   request.body = payload
-  response = http.request(request)
-  puts response.body
+  http.request(request)
+end
 
-when 'kill'
-  warn_missing('--submission_id') unless $cli_args[:submission_id]
+def kill_job(submission_id)
   uri = URI.parse($cluster_dispatcher_host)
   http = Net::HTTP.new(uri.host, uri.port)
-  request = Net::HTTP::Post.new("/v1/submissions/kill/#{$cli_args[:submission_id]}")
-  response = http.request(request)
-  puts response.body
+  request = Net::HTTP::Post.new("/v1/submissions/kill/#{submission_id}")
+  http.request(request)
+end
 
-when 'status'
-  warn_missing('--submission_id') unless $cli_args[:submission_id]
+def status_job(submission_id)
   uri = URI.parse($cluster_dispatcher_host)
   http = Net::HTTP.new(uri.host, uri.port)
-  request = Net::HTTP::Get.new("/v1/submissions/status/#{$cli_args[:submission_id]}")
-  response = http.request(request)
-  puts response.body
+  request = Net::HTTP::Get.new("/v1/submissions/status/#{submission_id}")
+  http.request(request)
+end
 
-when 'log'
-  warn_missing('--submission_id') unless $cli_args[:submission_id]
+def log_job(submission_id, follow, show_stderr)
+  status_response = JSON.parse(status_job(submission_id).body)
+  if status_response['driverState'] == "NOT_FOUND"
+    puts "Unable to find submission with id #{submission_id}"
+    exit 1
+  end
+  if status_response['driverState'] == "QUEUED"
+    puts "Submission with id #{submission_id} is still queued for execution"
+    if follow
+      print "Waiting for submission with id #{submission_id} to start"
+      waiting_thread = Thread.new do
+        queued = true
+        while queued do
+          begin
+            sleep 1
+            print "."
+          rescue Interrupt => e
+            exit 1
+          end
+          res = JSON.parse(status_job(submission_id).body)
+          queued = res['driverState'] == "QUEUED"
+        end
+      end
+      waiting_thread.join
+      puts ""
+    else
+      exit 1
+    end
+  end
   marathon_http = get_http("http://marathon.#{$cli_args[:host_suffix]}")
   marathon_response = marathon_http.request(Net::HTTP::Get.new('/v2/info'))
   unless marathon_response.class.body_permitted?
@@ -207,9 +225,9 @@ when 'log'
     exit 1
   end
   res = JSON.parse(mesos_response.body)
-  target_task = get_task(res, $cli_args[:submission_id])
+  target_task = get_task(res, submission_id)
   unless target_task
-    puts "Unable to find submission with id #{$cli_args[:submission_id]}"
+    puts "Unable to find submission with id #{submission_id} in Mesos. Maybe the submission is too old?"
     exit 1
   end
   slaves = res['slaves']
@@ -233,47 +251,73 @@ when 'log'
     exit 1
   end
   res = JSON.parse(slave_response.body)
-  target_executor = get_executor(res, $cli_args[:submission_id])
+  target_executor = get_executor(res, submission_id)
   unless target_executor
-    puts "Unable to find submission with id #{$cli_args[:submission_id]}"
+    puts "Unable to find submission with id #{submission_id} in executor. Maybe the submission is too old?"
     exit 1
   end
   directory = target_executor['directory']
-  stdout_file = Tempfile.new('spark' + $cli_args[:submission_id])
-  stderr_file = Tempfile.new('spark' + $cli_args[:submission_id])
+  stdout_file = Tempfile.new('spark' + submission_id)
+  stderr_file = Tempfile.new('spark' + submission_id)
   threads = []
-  if $cli_args[:follow]
+  if follow
     threads.push(Thread.new do
-      loop do
-        begin
-          sleep 1
-        rescue Interrupt => e
-          exit 1
-        end
-        mesos_download(slave_http, directory + '/stdout', stdout_file)
-        mesos_download(slave_http, directory + '/stderr', stderr_file)
-      end
-    end)
+                   loop do
+                     begin
+                       sleep 1
+                     rescue Interrupt => e
+                       exit 1
+                     end
+                     mesos_download(slave_http, directory + '/stdout', stdout_file)
+                     mesos_download(slave_http, directory + '/stderr', stderr_file)
+                   end
+                 end)
   else
     mesos_download(slave_http, directory + '/stdout', stdout_file)
     mesos_download(slave_http, directory + '/stderr', stderr_file)
   end
-  if $cli_args[:follow]
+  if follow
     threads.push(tail_file(stdout_file))
-    threads.push(tail_file(stderr_file, Proc.new { |line| puts line.chomp.red })) if $cli_args[:show_stderr]
+    threads.push(tail_file(stderr_file, Proc.new { |line| puts line.chomp.red })) if show_stderr
     begin
       threads.each { |thread| thread.join }
     rescue Interrupt => e
       exit 1
     end
   else
-    if $cli_args[:show_stderr]
+    if show_stderr
       stderr_file.rewind
       puts stderr_file.read.chomp.red
     end
     stdout_file.rewind
     puts stdout_file.read
   end
+end
+
+# -----------------
+# Program start
+# -----------------
+
+case $action
+when 'submit'
+  warn_missing('--jar') unless $cli_args[:jar]
+  warn_missing('--job') unless $cli_args[:job]
+  response = submit_job($cli_args[:jar], $cli_args[:job])
+  puts response.body
+
+when 'kill'
+  warn_missing('--submission_id') unless $cli_args[:submission_id]
+  response = kill_job($cli_argds[:submission_id])
+  puts response.body
+
+when 'status'
+  warn_missing('--submission_id') unless $cli_args[:submission_id]
+  response = status_job($cli_args[:submission_id])
+  puts response.body
+
+when 'log'
+  warn_missing('--submission_id') unless $cli_args[:submission_id]
+  log_job($cli_args[:submission_id], $cli_args[:follow], $cli_args[:show_stderr])
 
 else
   puts "Unrecognized action: #{$action}"
