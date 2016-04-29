@@ -58,13 +58,13 @@ OptionParser.new do |opts|
   end
 
   opts.on('-f', '--follow',
-          "Enables following the file updates in the 'log' action.") do |f|
-    $cli_args[:follow] = f
+          "Enables following the file updates in the 'log' action.") do
+    $cli_args[:follow] = true
   end
 
   opts.on('--hide-stderr',
-          "Hides stderr output in the 'log' action.") do |h|
-    $cli_args[:show_stderr] = false if h
+          "Hides stderr output in the 'log' action.") do
+    $cli_args[:show_stderr] = false
   end
 
   opts.on_tail('-h', '--help', 'Show this message.') do
