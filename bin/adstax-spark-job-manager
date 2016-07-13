@@ -307,7 +307,7 @@ when 'submit'
 
 when 'kill'
   warn_missing('--submission_id') unless $cli_args[:submission_id]
-  response = kill_job($cli_argds[:submission_id])
+  response = kill_job($cli_args[:submission_id])
   puts response.body
 
 when 'status'
