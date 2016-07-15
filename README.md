@@ -96,10 +96,3 @@ $ adstax-spark-job-manager kill --adstax-host sample-adstax-instance.dev.adstax.
   "success" : false
 }
 ```
-
-## Development
-
-The `bin` directory contains the scripts to be made available when the gem is
-installed.
-
-To install the gem locally without sending it to Nexus, run `rake install`.
