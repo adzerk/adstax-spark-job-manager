@@ -87,7 +87,7 @@ The `kill` command allows you to cancel and kill an ongoing job. Killing already
 finished jobs has no effect:
 
 ```
-$ adstax-spark-job-manager/bin/adstax-spark-job-manager kill --adstax-host sample-adstax-instance.dev.adstax.io --submission-id driver-20160713161243-0002
+$ adstax-spark-job-manager kill --adstax-host sample-adstax-instance.dev.adstax.io --submission-id driver-20160713161243-0002
 {
   "action" : "KillSubmissionResponse",
   "message" : "Driver already terminated",
