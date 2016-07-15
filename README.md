@@ -7,9 +7,12 @@ cluster.
 
 ### From RubyGems
 
-Make sure you have [gem](http://rubygems.org/) installed, and just run:
+Make sure you have [ruby][ruby-install] (at least v2.0.0) installed, and just
+run:
 
     $ gem install adstax-spark-job-manager
+
+[ruby-install]: https://www.ruby-lang.org/en/documentation/installation/
 
 ### From source
 
