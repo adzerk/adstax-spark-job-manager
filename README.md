@@ -5,13 +5,13 @@ cluster.
 
 ## Installation
 
-### RubyGems
+### From RubyGems
 
 Make sure you have [gem](http://rubygems.org/) installed, and just run:
 
     $ gem install adstax-spark-job-manager
 
-### Source
+### From source
 
 Clone this repo and build the gem:
 
