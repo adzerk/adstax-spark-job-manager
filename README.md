@@ -24,7 +24,7 @@ Clone this repo and build the gem:
 
 ## Usage
 
-The AdStax Spark Job Manager publishes a `adstax-spark-job-manager` binary,
+The AdStax Spark Job Manager publishes an `adstax-spark-job-manager` binary,
 which provides a set of utilities to submit, kill and query the status of Spark
 jobs running on an AdStax cluster. See the help for the command (running it with
 `-h`) for more details.
