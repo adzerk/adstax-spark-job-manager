@@ -12,7 +12,7 @@ require 'tempfile'
 # -----------------
 
 MAIN_CLASS = 'eu.shiftforward.adstax.spark.SparkJobRunner'
-SPARK_EXECUTOR_URI = 'https://s3.amazonaws.com/shiftforward-public/bin/spark/spark-2.0.0-bin-2.4.0.tgz'
+SPARK_EXECUTOR_URI = 'https://s3.amazonaws.com/shiftforward-public/bin/spark/spark-2.0.0-bin-hadoop2.4.tgz'
 ELASTICSEARCH_SPARK_JAR = 'https://s3.amazonaws.com/shiftforward-public/bin/spark/elasticsearch-spark_2.11-2.3.4.jar'
 SPARK_SCALA_VERSION = '2.11' # TODO: Support other versions and use different executors
 
