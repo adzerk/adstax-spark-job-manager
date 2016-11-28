@@ -124,7 +124,7 @@ def tail_file(file, output_method = Proc.new { |line| puts line })
       log.backward(10)
       begin
         log.tail { |line| output_method.call(line) }
-      rescue Interrupt => e
+      rescue Interrupt
         exit 1
       end
     end
@@ -199,7 +199,7 @@ def log_job(submission_id, follow, show_stderr)
           begin
             sleep 1
             print "."
-          rescue Interrupt => e
+          rescue Interrupt
             exit 1
           end
           res = JSON.parse(status_job(submission_id).body)
@@ -266,7 +266,7 @@ def log_job(submission_id, follow, show_stderr)
                    loop do
                      begin
                        sleep 1
-                     rescue Interrupt => e
+                     rescue Interrupt
                        exit 1
                      end
                      mesos_download(slave_http, directory + '/stdout', stdout_file)
@@ -282,7 +282,7 @@ def log_job(submission_id, follow, show_stderr)
     threads.push(tail_file(stderr_file, Proc.new { |line| puts line.chomp.red })) if show_stderr
     begin
       threads.each { |thread| thread.join }
-    rescue Interrupt => e
+    rescue Interrupt
       exit 1
     end
   else
