@@ -104,16 +104,19 @@ def get_executor(state_response, task_id)
   target_executors[0]
 end
 
-def mesos_download(http, remote_file, local_file)
-  params = { path: remote_file }
+def mesos_read_file(http, remote_file, offset = -1, length = -1)
+  params = {
+    path: remote_file,
+    offset: offset,
+    length: length
+  }
   encoded_params = URI.encode_www_form(params)
-  file_response = http.request(Net::HTTP::Get.new(['/files/download', encoded_params].join('?')))
-  unless file_response.class.body_permitted?
+  response = http.request(Net::HTTP::Get.new(['/files/read', encoded_params].join('?')))
+  unless response.class.body_permitted?
     puts 'Unable to fetch file from slave'
     exit 1
   end
-  local_file.rewind
-  local_file.write(file_response.body)
+  JSON.parse(response.body)
 end
 
 def tail_file(file, output_method = Proc.new { |line| puts line })
@@ -261,21 +264,37 @@ def log_job(submission_id, follow, show_stderr)
   stdout_file = Tempfile.new('spark' + submission_id)
   stderr_file = Tempfile.new('spark' + submission_id)
   threads = []
+  files = [{ remote: 'stdout', local: stdout_file },
+           { remote: 'stderr', local: stderr_file }]
   if follow
-    threads.push(Thread.new do
-                   loop do
-                     begin
-                       sleep 1
-                     rescue Interrupt
-                       exit 1
-                     end
-                     mesos_download(slave_http, directory + '/stdout', stdout_file)
-                     mesos_download(slave_http, directory + '/stderr', stderr_file)
-                   end
-                 end)
+    threads.push(
+      Thread.new do
+        offsets = {}
+        files.each { |file| offsets[file[:remote]] = 0 }
+        bytes = 100000
+        loop do
+          begin
+            sleep 1
+          rescue Interrupt
+            exit 1
+          end
+          files.each do |file|
+            remote_path = "#{directory}/#{file[:remote]}"
+            res = mesos_read_file(slave_http, remote_path, offsets[file[:remote]], bytes)
+            file[:local].write(res['data'])
+            file[:local].flush
+            offsets[file[:remote]] = res['offset'].to_i + res['data'].length
+          end
+        end
+      end
+    )
   else
-    mesos_download(slave_http, directory + '/stdout', stdout_file)
-    mesos_download(slave_http, directory + '/stderr', stderr_file)
+    files.each do |file|
+      remote_path = "#{directory}/#{file[:remote]}"
+      res = mesos_read_file(slave_http, remote_path)
+      res = mesos_read_file(slave_http, remote_path, 0, res['offset'])
+      file[:local].write(res['data'])
+    end
   end
   if follow
     threads.push(tail_file(stdout_file))
