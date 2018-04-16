@@ -18,7 +18,7 @@ run:
 
 Clone this repo and build the gem:
 
-    $ git clone git://github.com/ShiftForward/adstax-spark-job-manager.git
+    $ git clone git://github.com/velocidi/adstax-spark-job-manager.git
     $ gem build adstax-spark-job-manager.gemspec
     $ gem install adstax-spark-job-manager-0.2.0.gem
 
